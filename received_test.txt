@@ -1,4 +1,3 @@
-test.txt
 India is the seventh-largest country by land area and a vibrant global democracy.
 
 Introduction
