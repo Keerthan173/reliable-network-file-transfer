@@ -1,64 +1,130 @@
+
 package com.nettransfer.client;
 
+import com.nettransfer.util.FileIntegrity;
+
+import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.security.NoSuchAlgorithmException;
 
 public class Client {
 
     public static void main(String[] args) {
 
-        try {
-            Socket socket = new Socket("localhost", 5000);
+        // Step 1: Check whether a filename was provided
+        if (args.length == 0) {
+            System.out.println("Usage: Client <filename>");
+            return;
+        }
+
+        // Step 2: Validate the file
+        File file = new File(args[0]);
+
+        if (!file.exists() || !file.isFile()) {
+            System.out.println("File not found: " + file.getPath());
+            return;
+        }
+
+        // Step 3: Connect to the server
+        try (Socket socket = new Socket("localhost", 5000)) {
+
+            // Timeout for blocking socket reads, including the ACK
+            socket.setSoTimeout(30000);
 
             System.out.println("Connected to server!");
 
-            DataOutputStream outputStream =
-                    new DataOutputStream(socket.getOutputStream());
+            // Step 4: Calculate the original SHA-256 hash
+            String originalHash = FileIntegrity.calculateSHA256(file);
 
-            File file = new File("test.txt");
+            System.out.println("Original SHA-256: " + originalHash);
 
-            // Send file name
-            outputStream.writeUTF(file.getName());
+            // Keep both socket streams open until the ACK is received
+            try (DataOutputStream outputStream =
+                         new DataOutputStream(socket.getOutputStream());
+                 DataInputStream inputStream =
+                         new DataInputStream(socket.getInputStream())) {
 
-            // Send file size
-            outputStream.writeLong(file.length());
+                // Step 5: Send metadata and file contents
+                try (FileInputStream fileInputStream =
+                             new FileInputStream(file)) {
 
-            System.out.println("Filename: " + file.getName());
-            System.out.println("File size: " + file.length() + " bytes");
+                    outputStream.writeUTF(file.getName());
+                    outputStream.writeLong(file.length());
+                    outputStream.writeUTF(originalHash);
 
-            // Open file
-            FileInputStream fileInputStream =
-                    new FileInputStream(file);
+                    System.out.println("Filename: " + file.getName());
+                    System.out.println(
+                            "File size: " + file.length() + " bytes"
+                    );
 
-            byte[] buffer = new byte[8192];
+                    byte[] buffer = new byte[8192];
+                    long totalBytes = 0;
+                    int bytesRead;
 
-            long totalBytes = 0;
-            int bytesRead;
+                    while ((bytesRead = fileInputStream.read(buffer)) != -1) {
+                        outputStream.write(buffer, 0, bytesRead);
+                        outputStream.flush();
+                        totalBytes += bytesRead;
 
-            // Send file data
-            while ((bytesRead = fileInputStream.read(buffer)) != -1) {
+                        // TEMPORARY: Slow down transfer for interruption testing
+                        Thread.sleep(100);
+                    }
 
-                outputStream.write(buffer, 0, bytesRead);
+                    System.out.println("Total bytes sent: " + totalBytes);
+                    System.out.println("Waiting for server ACK...");
+                }
 
-                totalBytes += bytesRead;
+                // Step 6: Read the server acknowledgment
+                String acknowledgment = inputStream.readUTF();
 
-                System.out.println(
-                        "Chunk sent: " + bytesRead + " bytes"
-                );
+                if ("SUCCESS".equals(acknowledgment)) {
+
+                    System.out.println(
+                            "Server ACK: File received and verified successfully."
+                    );
+
+                } else if ("FAILED".equals(acknowledgment)) {
+
+                    System.out.println(
+                            "Server ACK: File transfer or integrity verification failed."
+                    );
+
+                } else {
+
+                    System.out.println(
+                            "Unexpected server acknowledgment: "
+                                    + acknowledgment
+                    );
+                }
             }
 
-            outputStream.flush();
+        } catch (InterruptedException e) {
 
-            System.out.println("Total bytes sent: " + totalBytes);
+            Thread.currentThread().interrupt();
+            System.out.println("File transfer interrupted.");
 
-            fileInputStream.close();
-            socket.close();
+        } catch (SocketTimeoutException e) {
+
+            System.out.println(
+                    "Timeout: Server did not respond within 30 seconds."
+            );
+
+        } catch (NoSuchAlgorithmException e) {
+
+            System.out.println(
+                    "SHA-256 algorithm unavailable: " + e.getMessage()
+            );
 
         } catch (IOException e) {
-            e.printStackTrace();
+
+            System.out.println(
+                    "File transfer failed: " + e.getMessage()
+            );
         }
     }
 }
