@@ -17,6 +17,7 @@ public class ClientHandler implements Runnable {
     private final Socket clientSocket;
     private volatile long totalBytesForStats = 0;
     private String transferStatus = "FAILED";
+    private String receivedFileName = "UNKNOWN";
 
     // Keep the output file accessible to the catch block
     private File outputFile;
@@ -27,6 +28,7 @@ public class ClientHandler implements Runnable {
 
     @Override
     public void run() {
+        transferStatus = "FAILED";
 
         long startTime = System.currentTimeMillis();
 
@@ -44,6 +46,7 @@ public class ClientHandler implements Runnable {
 
             // Step 1: Read metadata from the client
             String fileName = inputStream.readUTF();
+            receivedFileName = fileName;
             long fileSize = inputStream.readLong();
             String expectedHash = inputStream.readUTF();
 
@@ -217,6 +220,18 @@ public class ClientHandler implements Runnable {
             );
             System.out.println("Status: " + transferStatus);
             System.out.println("======================================");
+
+
+
+            TransferHistory.recordTransfer(
+                    LocalDateTime.now().toString(),
+                    clientSocket.getInetAddress().getHostAddress(),
+                    receivedFileName,
+                    totalBytesForStats,
+                    duration,
+                    speedMBps,
+                    transferStatus
+            );
 
             try {
                 if (!clientSocket.isClosed()) {

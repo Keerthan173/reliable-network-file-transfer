@@ -8,6 +8,14 @@ public class Server {
 
     public static void main(String[] args) {
 
+        Thread heartbeatThread = new Thread(
+                HeartbeatServer::start,
+                "udp-heartbeat-server"
+        );
+
+        heartbeatThread.setDaemon(true);
+        heartbeatThread.start();
+
         try (ServerSocket serverSocket = new ServerSocket(5000)) {
 
             System.out.println("Server started on port 5000.");

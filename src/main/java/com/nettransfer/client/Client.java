@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.security.NoSuchAlgorithmException;
+import java.util.UUID;
 
 public class Client {
 
@@ -30,26 +31,34 @@ public class Client {
             return;
         }
 
-        // Step 3: Connect to the server
+        // Stable identity for this client process
+        String clientId = UUID.randomUUID().toString();
+        HeartbeatService heartbeatService =
+                new HeartbeatService(clientId, "localhost");
+
+        // Step 3: Connect to the TCP server
         try (Socket socket = new Socket("localhost", 5000)) {
 
-            // Timeout for blocking socket reads, including the ACK
             socket.setSoTimeout(30000);
 
             System.out.println("Connected to server!");
+            System.out.println("Client ID: " + clientId);
 
-            // Step 4: Calculate the original SHA-256 hash
+            // Step 4: Start UDP heartbeats
+            heartbeatService.start();
+
+            // Step 5: Calculate the original SHA-256 hash
             String originalHash = FileIntegrity.calculateSHA256(file);
 
             System.out.println("Original SHA-256: " + originalHash);
 
-            // Keep both socket streams open until the ACK is received
+            // Keep socket streams open until ACK is received
             try (DataOutputStream outputStream =
                          new DataOutputStream(socket.getOutputStream());
                  DataInputStream inputStream =
                          new DataInputStream(socket.getInputStream())) {
 
-                // Step 5: Send metadata and file contents
+                // Step 6: Send metadata and file contents
                 try (FileInputStream fileInputStream =
                              new FileInputStream(file)) {
 
@@ -71,7 +80,7 @@ public class Client {
                         outputStream.flush();
                         totalBytes += bytesRead;
 
-                        // TEMPORARY: Slow down transfer for interruption testing
+                        // Temporary delay for interruption testing
                         Thread.sleep(100);
                     }
 
@@ -79,23 +88,18 @@ public class Client {
                     System.out.println("Waiting for server ACK...");
                 }
 
-                // Step 6: Read the server acknowledgment
+                // Step 7: Read the server acknowledgment
                 String acknowledgment = inputStream.readUTF();
 
                 if ("SUCCESS".equals(acknowledgment)) {
-
                     System.out.println(
                             "Server ACK: File received and verified successfully."
                     );
-
                 } else if ("FAILED".equals(acknowledgment)) {
-
                     System.out.println(
                             "Server ACK: File transfer or integrity verification failed."
                     );
-
                 } else {
-
                     System.out.println(
                             "Unexpected server acknowledgment: "
                                     + acknowledgment
@@ -125,6 +129,11 @@ public class Client {
             System.out.println(
                     "File transfer failed: " + e.getMessage()
             );
+
+        } finally {
+
+            // Stop heartbeats when the client finishes or fails
+            heartbeatService.stop();
         }
     }
 }
